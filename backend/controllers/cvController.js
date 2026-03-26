@@ -1,0 +1,162 @@
+const db = require('../db');
+
+// get all CVs
+const getAllCVs = async (req, res, next) => {
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, name, email, keyprogramming, URLlinks FROM cvs'
+    );
+    return res.json(rows);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// get single CV by id
+const getCVById = async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    // fetch CV data from database
+    const [rows] = await db.execute(
+      'SELECT id, name, email, keyprogramming, profile, education, URLlinks FROM cvs WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'CV not found' });
+    }
+    return res.json(rows[0]);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// search CVs by name or programming skills
+const searchCVs = async (req, res, next) => {
+  try {
+    const name = (req.query.name || '').trim();
+    const keyprogramming = (req.query.keyprogramming || '').trim();
+
+    if (!name && !keyprogramming) {
+      return res.status(400).json({ message: 'Search by name or keyprogramming' });
+    }
+
+    // build query with search filters
+    let sql = 'SELECT id, name, email, keyprogramming FROM cvs WHERE 1=1';
+    const data = [];
+
+    if (name) {
+      sql += ' AND LOWER(name) LIKE LOWER(?)';
+      data.push(`%${name}%`);
+    }
+
+    if (keyprogramming) {
+      sql += ' AND LOWER(keyprogramming) LIKE LOWER(?)';
+      data.push(`%${keyprogramming}%`);
+    }
+
+    const [rows] = await db.execute(sql, data);
+    return res.json(rows);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// create new CV for logged in user
+const createCV = async (req, res, next) => {
+  try {
+    const name = (req.body.name || '').trim();
+    const keyprogramming = (req.body.keyprogramming || '').trim();
+    const education = (req.body.education || '').trim();
+    const profile = (req.body.profile || '').trim();
+    const URLlinks = (req.body.URLlinks || '').trim();
+    const email = req.user.email;
+
+    // validate all fields are filled
+    if (!name || !keyprogramming || !education || !profile || !URLlinks) {
+      return res.status(400).json({ message: 'Please fill required fields' });
+    }
+
+    // check if user exists and has CV already
+    const [existing] = await db.execute(
+      'SELECT id, keyprogramming, profile, education, URLlinks FROM cvs WHERE email = ?',
+      [email]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'User not found. Please register first.' });
+    }
+
+    const hasCv =
+      (existing[0].keyprogramming || '').trim() ||
+      (existing[0].profile || '').trim() ||
+      (existing[0].education || '').trim() ||
+      (existing[0].URLlinks || '').trim();
+
+    if (hasCv) {
+      return res.status(409).json({ message: 'CV already exists. Use update.' });
+    }
+
+    // save CV to database
+    await db.execute(
+      'UPDATE cvs SET name = ?, keyprogramming = ?, profile = ?, education = ?, URLlinks = ? WHERE email = ?',
+      [name, keyprogramming, profile, education, URLlinks, email]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'CV created successfully',
+      email
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// update CV
+const updateCV = async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const name = (req.body.name || '').trim();
+    const keyprogramming = (req.body.keyprogramming || '').trim();
+    const education = (req.body.education || '').trim();
+    const profile = (req.body.profile || '').trim();
+    const URLlinks = (req.body.URLlinks || '').trim();
+    const email = req.user.email;
+
+    // validate fields
+    if (!name || !keyprogramming || !education || !profile || !URLlinks) {
+      return res.status(400).json({ message: 'Please fill required fields' });
+    }
+
+    // check if CV exists and user owns it
+    const [existing] = await db.execute('SELECT id, email FROM cvs WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'CV not found' });
+    }
+    if (existing[0].email !== email) {
+      return res.status(403).json({ message: 'Not allowed to update this CV' });
+    }
+
+    // save updated CV
+    await db.execute(
+      'UPDATE cvs SET name = ?, keyprogramming = ?, profile = ?, education = ?, URLlinks = ? WHERE id = ?',
+      [name, keyprogramming, profile, education, URLlinks, id]
+    );
+
+    return res.json({
+      success: true,
+      message: 'CV updated successfully',
+      id
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = {
+  getAllCVs,
+  getCVById,
+  searchCVs,
+  createCV,
+  updateCV
+};
